@@ -35,47 +35,59 @@ export async function readLabel(
     return { ok: false, error: "Add your Gemini key in Settings to scan.", needsKey: true };
   }
 
-  let res: Response;
-  try {
-    res = await fetch(ENDPOINT, {
+  const buildBody = (withThinking: boolean) => ({
+    contents: [
+      {
+        parts: [
+          { inlineData: { mimeType: "image/jpeg", data: base64Jpeg } },
+          { text: PROMPT },
+        ],
+      },
+    ],
+    generationConfig: {
+      // thinkingLevel is nested under thinkingConfig and is an uppercase enum;
+      // putting it directly on generationConfig is rejected outright.
+      ...(withThinking ? { thinkingConfig: { thinkingLevel: "LOW" } } : {}),
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          names: { type: "ARRAY", items: { type: "STRING" } },
+        },
+        required: ["names"],
+      },
+    },
+  });
+
+  const send = (withThinking: boolean) =>
+    fetch(ENDPOINT, {
       method: "POST",
       signal,
       headers: {
         "content-type": "application/json",
         "x-goog-api-key": apiKey,
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { inline_data: { mime_type: "image/jpeg", data: base64Jpeg } },
-              { text: PROMPT },
-            ],
-          },
-        ],
-        generationConfig: {
-          // Gemini 3 replaced thinkingBudget with thinkingLevel and dropped
-          // temperature/topP/topK entirely.
-          thinkingLevel: "low",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              names: { type: "ARRAY", items: { type: "STRING" } },
-            },
-            required: ["names"],
-          },
-        },
-      }),
+      body: JSON.stringify(buildBody(withThinking)),
     });
+
+  let res: Response;
+  let data: GeminiResponse;
+  try {
+    res = await send(true);
+    data = (await res.json().catch(() => ({}))) as GeminiResponse;
+
+    // Thinking controls have moved around between Gemini versions. If the API
+    // ever rejects the field again, drop it and scan anyway rather than fail.
+    if (!res.ok && /Unknown name .*thinking/i.test(data.error?.message ?? "")) {
+      res = await send(false);
+      data = (await res.json().catch(() => ({}))) as GeminiResponse;
+    }
   } catch (err) {
     if ((err as Error)?.name === "AbortError") {
       return { ok: false, error: "Scan cancelled." };
     }
     return { ok: false, error: "No connection. Use Search instead." };
   }
-
-  const data = (await res.json().catch(() => ({}))) as GeminiResponse;
 
   if (!res.ok) {
     const message = data.error?.message ?? `Request failed (${res.status}).`;
