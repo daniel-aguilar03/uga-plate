@@ -1,0 +1,17 @@
+{
+  "name": "uga-barcode-probe",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "html5-qrcode": "^2.3.8"
+  },
+  "devDependencies": {
+    "vite": "^7.1.9"
+  }
+}

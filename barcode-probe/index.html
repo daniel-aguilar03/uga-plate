@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="theme-color" content="#0a0a0a" />
+    <title>UGA barcode probe</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">UGA Plate · probe</p>
+        <h1>Barcode test</h1>
+        <p class="lede">
+          Point at a dining hall shelf label. If a code appears below, barcode
+          scanning can replace Gemini for that label. If nothing ever scans,
+          stick with search / OCR.
+        </p>
+      </header>
+
+      <section class="panel">
+        <div id="reader"></div>
+        <div class="actions">
+          <button type="button" id="startCam" class="primary">Start camera</button>
+          <button type="button" id="stopCam" class="ghost" disabled>Stop</button>
+          <label class="file">
+            Or pick a photo
+            <input id="fileInput" type="file" accept="image/*" capture="environment" />
+          </label>
+        </div>
+        <p id="status" class="status">Camera idle</p>
+      </section>
+
+      <section class="panel">
+        <div class="row">
+          <h2>Last scan</h2>
+          <button type="button" id="copyLast" class="ghost small" disabled>Copy</button>
+        </div>
+        <pre id="last" class="mono empty">Nothing yet</pre>
+      </section>
+
+      <section class="panel">
+        <div class="row">
+          <h2>History</h2>
+          <button type="button" id="clearLog" class="ghost small">Clear</button>
+        </div>
+        <ol id="log" class="log"></ol>
+        <p class="hint">
+          In the dining hall, scan 5–10 labels and note whether the raw value
+          looks like a stable id (digits / short code) or junk. Compare to
+          Nutrislice <code>synced_id</code> later.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
