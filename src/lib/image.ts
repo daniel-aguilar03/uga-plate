@@ -5,6 +5,10 @@ const JPEG_QUALITY = 0.82;
  * Shrink a camera photo to something small enough to upload over dining-hall
  * wifi while keeping label text legible, and hand back raw base64 for Gemini.
  */
+export function base64ToDataUrl(base64: string) {
+  return `data:image/jpeg;base64,${base64}`;
+}
+
 export async function toBase64Jpeg(
   file: File | Blob,
 ): Promise<{ base64: string; previewUrl: string }> {

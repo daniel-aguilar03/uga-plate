@@ -145,6 +145,42 @@ async function tryModel(
   }
 }
 
+/**
+ * Reads a batch of label photos at once. Requests run concurrently so a whole
+ * plate costs about the same wall-clock time as a single photo, which is the
+ * point: you snap labels down the line without waiting, then read them all
+ * when you sit down.
+ */
+export async function readLabels(
+  images: string[],
+  apiKey: string,
+  options: {
+    signal?: AbortSignal;
+    model?: string;
+    concurrency?: number;
+    onProgress?: (done: number, total: number) => void;
+  } = {},
+): Promise<VisionResult[]> {
+  const { concurrency = 4, onProgress, ...rest } = options;
+  const results: VisionResult[] = new Array(images.length);
+  let cursor = 0;
+  let done = 0;
+
+  const worker = async () => {
+    while (cursor < images.length) {
+      const index = cursor++;
+      results[index] = await readLabel(images[index], apiKey, rest);
+      onProgress?.(++done, images.length);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, images.length) }, worker),
+  );
+
+  return results;
+}
+
 export async function readLabel(
   base64Jpeg: string,
   apiKey: string,

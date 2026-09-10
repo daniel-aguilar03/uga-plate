@@ -1,10 +1,11 @@
-import type { PlateItem, SavedPlate } from "../types";
+import type { Capture, PlateItem, SavedPlate } from "../types";
 
 const KEYS = {
   apiKey: "ugaplate.apiKey",
   model: "ugaplate.model",
   hall: "ugaplate.hall",
   plate: "ugaplate.plate",
+  captures: "ugaplate.captures",
   recents: "ugaplate.recents",
   history: "ugaplate.history",
 } as const;
@@ -39,6 +40,26 @@ export const storage = {
 
   getPlate: () => read<PlateItem[]>(KEYS.plate, []),
   setPlate: (v: PlateItem[]) => write(KEYS.plate, v),
+
+  /**
+   * Label photos waiting to be read. Persisted because iOS can discard a
+   * backgrounded tab, and losing a line's worth of photos would be far worse
+   * than the storage cost.
+   */
+  getCaptures: () => read<Capture[]>(KEYS.captures, []),
+  setCaptures: (v: Capture[]) => {
+    try {
+      localStorage.setItem(KEYS.captures, JSON.stringify(v));
+    } catch {
+      // Photos are big; if the quota is hit, keep only the newest few rather
+      // than leaving a stale list behind.
+      try {
+        localStorage.setItem(KEYS.captures, JSON.stringify(v.slice(-4)));
+      } catch {
+        localStorage.removeItem(KEYS.captures);
+      }
+    }
+  },
 
   /** Food ids most recently added, newest first. */
   getRecents: () => read<number[]>(KEYS.recents, []),

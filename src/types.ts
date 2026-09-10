@@ -24,6 +24,14 @@ export type Catalog = {
   foods: Food[];
 };
 
+/** A label photo snapped on the line, waiting to be read. */
+export type Capture = {
+  id: string;
+  /** Downscaled JPEG, base64 without the data-url prefix. */
+  base64: string;
+  takenAt: number;
+};
+
 /** One food on the plate, with how many servings were taken. */
 export type PlateItem = {
   /** Unique per row so the same dish can be added twice if you want. */

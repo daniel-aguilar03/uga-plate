@@ -8,13 +8,22 @@ No backend. No accounts. No app store.
 
 ## How it works
 
-1. Tap **Scan label** and photograph the shelf label.
-2. Gemini reads the dish name off the photo, in the browser, using your key.
-3. The name is matched against a bundled catalog of ~2,150 real UGA dishes.
-4. Set portions with `-` / `+` in half steps and add it.
-5. Repeat down the line. Tap **Finish plate** when you sit down.
+Snap first, read later. Standing in line waiting on a network round trip for
+every dish is the slow part, so the app never calls anything while you are
+moving.
+
+1. Tap **Snap label** at each station and keep walking. Photos queue up on the
+   device with no network calls at all.
+2. Sit down, tap **Read N labels**. Every photo goes to Gemini at once, in
+   parallel, so five labels take about as long as one.
+3. Review the whole plate in a single list: adjust portions, fix anything the
+   app flagged, drop what you do not want.
+4. **Add to plate** once, and you are done.
 
 Search is always there as the fast path -- type three letters and tap.
+
+Queued photos survive a reload, since iOS will happily discard a backgrounded
+tab and losing a line's worth of photos would be worse than the storage cost.
 
 ## Setup
 
