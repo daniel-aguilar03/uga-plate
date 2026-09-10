@@ -1,29 +1,40 @@
 import { useEffect, useState } from "react";
 import { GENERATED_AT, HALLS } from "../lib/catalog";
+import { AUTO_MODEL, MODELS } from "../lib/vision";
 import { Sheet } from "./Sheet";
 
 type Props = {
   open: boolean;
   apiKey: string;
   hall: string;
-  onSave: (next: { apiKey: string; hall: string }) => void;
+  model: string;
+  onSave: (next: { apiKey: string; hall: string; model: string }) => void;
   onClose: () => void;
 };
 
-export function SettingsSheet({ open, apiKey, hall, onSave, onClose }: Props) {
+export function SettingsSheet({
+  open,
+  apiKey,
+  hall,
+  model,
+  onSave,
+  onClose,
+}: Props) {
   const [keyDraft, setKeyDraft] = useState(apiKey);
   const [hallDraft, setHallDraft] = useState(hall);
+  const [modelDraft, setModelDraft] = useState(model);
   const [reveal, setReveal] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setKeyDraft(apiKey);
     setHallDraft(hall);
+    setModelDraft(model);
     setReveal(false);
-  }, [open, apiKey, hall]);
+  }, [open, apiKey, hall, model]);
 
   const save = () => {
-    onSave({ apiKey: keyDraft.trim(), hall: hallDraft });
+    onSave({ apiKey: keyDraft.trim(), hall: hallDraft, model: modelDraft });
     onClose();
   };
 
@@ -74,6 +85,27 @@ export function SettingsSheet({ open, apiKey, hall, onSave, onClose }: Props) {
           </a>
           . It is stored only on this phone and sent only to Google. Search works
           without one.
+        </p>
+
+        <label className="mt-6 mb-1.5 block text-xs font-semibold tracking-wider text-neutral-500 uppercase">
+          Model
+        </label>
+        <select
+          value={modelDraft}
+          onChange={(e) => setModelDraft(e.target.value)}
+          className="w-full appearance-none rounded-xl border border-ink-line bg-black/40 px-4 py-3 outline-none focus:border-uga-red"
+        >
+          <option value={AUTO_MODEL}>Automatic (recommended)</option>
+          {MODELS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs text-neutral-500">
+          Automatic starts with the fastest model and moves on if one is busy.
+          Google&rsquo;s newest model is often overloaded on the free tier, so
+          pinning it is usually the wrong choice.
         </p>
 
         <label className="mt-6 mb-1.5 block text-xs font-semibold tracking-wider text-neutral-500 uppercase">

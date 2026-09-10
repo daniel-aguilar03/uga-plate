@@ -2,6 +2,7 @@ import type { PlateItem, SavedPlate } from "../types";
 
 const KEYS = {
   apiKey: "ugaplate.apiKey",
+  model: "ugaplate.model",
   hall: "ugaplate.hall",
   plate: "ugaplate.plate",
   recents: "ugaplate.recents",
@@ -28,6 +29,10 @@ function write(key: string, value: unknown) {
 export const storage = {
   getApiKey: () => read<string>(KEYS.apiKey, ""),
   setApiKey: (v: string) => write(KEYS.apiKey, v.trim()),
+
+  /** "auto" walks the model fallback chain; anything else pins one model. */
+  getModel: () => read<string>(KEYS.model, "auto"),
+  setModel: (v: string) => write(KEYS.model, v),
 
   getHall: () => read<string>(KEYS.hall, ""),
   setHall: (v: string) => write(KEYS.hall, v),

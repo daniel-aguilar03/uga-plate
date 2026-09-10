@@ -25,6 +25,7 @@ export default function App() {
 
   const [apiKey, setApiKey] = useState(() => storage.getApiKey());
   const [hall, setHall] = useState(() => storage.getHall());
+  const [model, setModel] = useState(() => storage.getModel());
 
   const [scanning, setScanning] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -62,7 +63,7 @@ export default function App() {
       setScanning(true);
       try {
         const { base64 } = await toBase64Jpeg(file);
-        const result = await readLabel(base64, apiKey);
+        const result = await readLabel(base64, apiKey, { model });
 
         if (!result.ok) {
           setNotice(result.error);
@@ -83,7 +84,7 @@ export default function App() {
         setScanning(false);
       }
     },
-    [apiKey, presentName],
+    [apiKey, model, presentName],
   );
 
   const addAndAdvance = useCallback(
@@ -257,11 +258,14 @@ export default function App() {
         open={settingsOpen}
         apiKey={apiKey}
         hall={hall}
-        onSave={({ apiKey: k, hall: h }) => {
+        model={model}
+        onSave={({ apiKey: k, hall: h, model: m }) => {
           setApiKey(k);
           storage.setApiKey(k);
           setHall(h);
           storage.setHall(h);
+          setModel(m);
+          storage.setModel(m);
         }}
         onClose={() => setSettingsOpen(false)}
       />

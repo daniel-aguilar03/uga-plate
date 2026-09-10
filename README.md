@@ -33,8 +33,18 @@ Scanning needs a free Gemini key from
 paste it, and save.
 
 The key is kept in `localStorage` on that one device and is sent only to
-Google. There is no server to leak it. Each scan costs a fraction of a cent,
-and the free tier covers normal use. **Search works without a key.**
+Google. There is no server to leak it. **Search works without a key.**
+
+### If scanning says a model is busy
+
+Google's newest flagship is heavily contended on the free tier and can return
+"the model is overloaded" for days at a stretch. Reading a few words of large
+printed text does not need a frontier model, so the app tries the fast, cheap
+Flash-Lite models first and only falls back toward the newest one. All the
+models it uses are free-tier eligible.
+
+Settings has a model picker if you want to pin one, but **Automatic** is
+almost always the right choice.
 
 ## Where the nutrition data comes from
 

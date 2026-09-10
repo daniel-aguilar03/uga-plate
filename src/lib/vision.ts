@@ -3,8 +3,24 @@
  * browser. Google's API sends CORS headers and accepts `x-goog-api-key`, so
  * this needs no server -- the key lives only in this device's localStorage.
  */
-const MODEL = "gemini-3.8-flash";
-const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/**
+ * Tried in order until one answers. Reading a few words of large printed text
+ * does not need a frontier model, and the newest flagship is by far the most
+ * contended on the free tier -- it returns "model is overloaded" for days at a
+ * time. The lite models are built for high-volume work and are almost always
+ * available, so they go first. Every entry here is free-tier eligible.
+ */
+export const MODELS = [
+  { id: "gemini-3.5-flash-lite", label: "3.5 Flash-Lite (fastest)" },
+  { id: "gemini-3.1-flash-lite", label: "3.1 Flash-Lite" },
+  { id: "gemini-3.6-flash", label: "3.6 Flash" },
+  { id: "gemini-3.7-flash", label: "3.7 Flash" },
+  { id: "gemini-3.8-flash", label: "3.8 Flash (newest, often busy)" },
+] as const;
+
+export const AUTO_MODEL = "auto";
 
 const PROMPT = `This photo shows one or more food labels at a University of Georgia dining hall.
 
@@ -17,7 +33,7 @@ Rules:
 - If no dish title is readable, return an empty list.`;
 
 export type VisionResult =
-  | { ok: true; names: string[] }
+  | { ok: true; names: string[]; model: string }
   | { ok: false; error: string; needsKey?: boolean };
 
 type GeminiResponse = {
@@ -26,16 +42,8 @@ type GeminiResponse = {
   error?: { message?: string; status?: string };
 };
 
-export async function readLabel(
-  base64Jpeg: string,
-  apiKey: string,
-  signal?: AbortSignal,
-): Promise<VisionResult> {
-  if (!apiKey) {
-    return { ok: false, error: "Add your Gemini key in Settings to scan.", needsKey: true };
-  }
-
-  const buildBody = (withThinking: boolean) => ({
+function buildBody(base64Jpeg: string, withThinking: boolean) {
+  return {
     contents: [
       {
         parts: [
@@ -51,60 +59,68 @@ export async function readLabel(
       responseMimeType: "application/json",
       responseSchema: {
         type: "OBJECT",
-        properties: {
-          names: { type: "ARRAY", items: { type: "STRING" } },
-        },
+        properties: { names: { type: "ARRAY", items: { type: "STRING" } } },
         required: ["names"],
       },
     },
-  });
+  };
+}
+
+type Attempt =
+  | { kind: "ok"; names: string[] }
+  | { kind: "busy" }
+  | { kind: "fatal"; error: string; needsKey?: boolean };
+
+async function tryModel(
+  model: string,
+  base64Jpeg: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<Attempt> {
+  const url = `${API_BASE}/${model}:generateContent`;
 
   const send = (withThinking: boolean) =>
-    fetch(ENDPOINT, {
+    fetch(url, {
       method: "POST",
       signal,
-      headers: {
-        "content-type": "application/json",
-        "x-goog-api-key": apiKey,
-      },
-      body: JSON.stringify(buildBody(withThinking)),
+      headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+      body: JSON.stringify(buildBody(base64Jpeg, withThinking)),
     });
 
-  let res: Response;
-  let data: GeminiResponse;
-  try {
-    res = await send(true);
-    data = (await res.json().catch(() => ({}))) as GeminiResponse;
+  let res = await send(true);
+  let data = (await res.json().catch(() => ({}))) as GeminiResponse;
 
-    // Thinking controls have moved around between Gemini versions. If the API
-    // ever rejects the field again, drop it and scan anyway rather than fail.
-    if (!res.ok && /Unknown name .*thinking/i.test(data.error?.message ?? "")) {
-      res = await send(false);
-      data = (await res.json().catch(() => ({}))) as GeminiResponse;
-    }
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") {
-      return { ok: false, error: "Scan cancelled." };
-    }
-    return { ok: false, error: "No connection. Use Search instead." };
+  // Thinking controls have moved between Gemini versions and not every model
+  // accepts them. If the field is the problem, scan without it rather than fail.
+  if (!res.ok && /thinking/i.test(data.error?.message ?? "")) {
+    res = await send(false);
+    data = (await res.json().catch(() => ({}))) as GeminiResponse;
   }
 
   if (!res.ok) {
     const message = data.error?.message ?? `Request failed (${res.status}).`;
+
+    // Busy or missing: worth trying the next model in the list.
+    if (res.status === 503 || res.status === 429 || res.status === 500) {
+      return { kind: "busy" };
+    }
+    if (res.status === 404) return { kind: "busy" };
+
     if (res.status === 400 && /api key/i.test(message)) {
-      return { ok: false, error: "That API key was rejected.", needsKey: true };
+      return { kind: "fatal", error: "That API key was rejected.", needsKey: true };
     }
     if (res.status === 403) {
-      return { ok: false, error: "Key lacks access to the Gemini API.", needsKey: true };
+      return {
+        kind: "fatal",
+        error: "Key lacks access to the Gemini API.",
+        needsKey: true,
+      };
     }
-    if (res.status === 429) {
-      return { ok: false, error: "Rate limited by Google. Wait a moment." };
-    }
-    return { ok: false, error: message };
+    return { kind: "fatal", error: message };
   }
 
   if (data.promptFeedback?.blockReason) {
-    return { ok: false, error: "Google blocked that image." };
+    return { kind: "fatal", error: "Google blocked that image." };
   }
 
   const text = data.candidates?.[0]?.content?.parts
@@ -112,7 +128,7 @@ export async function readLabel(
     .join("")
     .trim();
 
-  if (!text) return { ok: false, error: "Nothing readable in that photo." };
+  if (!text) return { kind: "busy" };
 
   try {
     const parsed = JSON.parse(text) as { names?: unknown };
@@ -122,9 +138,50 @@ export async function readLabel(
           .map((n) => n.trim())
           .filter(Boolean)
       : [];
-    return { ok: true, names };
+    return { kind: "ok", names };
   } catch {
     // Structured output should hold, but never lose a usable read to a parse slip.
-    return { ok: true, names: [text.replace(/^["']|["']$/g, "")] };
+    return { kind: "ok", names: [text.replace(/^["']|["']$/g, "")] };
   }
+}
+
+export async function readLabel(
+  base64Jpeg: string,
+  apiKey: string,
+  options: { signal?: AbortSignal; model?: string } = {},
+): Promise<VisionResult> {
+  if (!apiKey) {
+    return { ok: false, error: "Add your Gemini key in Settings to scan.", needsKey: true };
+  }
+
+  const { signal, model = AUTO_MODEL } = options;
+  const chain =
+    model && model !== AUTO_MODEL ? [model] : MODELS.map((m) => m.id);
+
+  let sawBusy = false;
+
+  for (const candidate of chain) {
+    let attempt: Attempt;
+    try {
+      attempt = await tryModel(candidate, base64Jpeg, apiKey, signal);
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") {
+        return { ok: false, error: "Scan cancelled." };
+      }
+      return { ok: false, error: "No connection. Use Search instead." };
+    }
+
+    if (attempt.kind === "ok") return { ok: true, names: attempt.names, model: candidate };
+    if (attempt.kind === "fatal") {
+      return { ok: false, error: attempt.error, needsKey: attempt.needsKey };
+    }
+    sawBusy = true;
+  }
+
+  return {
+    ok: false,
+    error: sawBusy
+      ? "All Gemini models are busy right now. Search still works."
+      : "Could not reach Gemini. Search still works.",
+  };
 }
