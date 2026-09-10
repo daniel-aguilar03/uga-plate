@@ -7,6 +7,7 @@ const KEYS = {
   plate: "ugaplate.plate",
   captures: "ugaplate.captures",
   recents: "ugaplate.recents",
+  favorites: "ugaplate.favorites",
   history: "ugaplate.history",
 } as const;
 
@@ -66,6 +67,18 @@ export const storage = {
   pushRecent: (id: number) => {
     const next = [id, ...read<number[]>(KEYS.recents, []).filter((x) => x !== id)];
     write(KEYS.recents, next.slice(0, 30));
+  },
+
+  /** Food ids the user starred for fast pickup in line. */
+  getFavorites: () => read<number[]>(KEYS.favorites, []),
+  isFavorite: (id: number) => read<number[]>(KEYS.favorites, []).includes(id),
+  toggleFavorite: (id: number) => {
+    const current = read<number[]>(KEYS.favorites, []);
+    const next = current.includes(id)
+      ? current.filter((x) => x !== id)
+      : [id, ...current];
+    write(KEYS.favorites, next.slice(0, 40));
+    return next.includes(id);
   },
 
   getHistory: () => read<SavedPlate[]>(KEYS.history, []),

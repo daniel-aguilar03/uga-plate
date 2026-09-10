@@ -8,19 +8,13 @@ No backend. No accounts. No app store.
 
 ## How it works
 
-Snap first, read later. Standing in line waiting on a network round trip for
-every dish is the slow part, so the app never calls anything while you are
-moving.
+**Search first.** Type a few letters, tap a dish, set portions. Favorites and
+recents sit at the top of search so the usual Bolton lunch is one tap.
 
-1. Tap **Snap label** at each station and keep walking. Photos queue up on the
-   device with no network calls at all.
-2. Sit down, tap **Read N labels**. Every photo goes to Gemini at once, in
-   parallel, so five labels take about as long as one.
-3. Review the whole plate in a single list: adjust portions, fix anything the
-   app flagged, drop what you do not want.
-4. **Add to plate** once, and you are done.
-
-Search is always there as the fast path -- type three letters and tap.
+**Camera is optional polish.** Snap labels as you walk if you want; nothing
+hits the network until you sit down and tap **Read N labels**. All photos go
+in **one** Gemini multimodal request, which returns a dish-name list per
+photo — then you review the whole plate once.
 
 Queued photos survive a reload, since iOS will happily discard a backgrounded
 tab and losing a line's worth of photos would be worse than the storage cost.

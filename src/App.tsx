@@ -14,7 +14,7 @@ import { readLabels } from "./lib/vision";
 import { usePlate } from "./state/plate";
 import type { Capture, Food } from "./types";
 
-const MAX_CAPTURES = 15;
+const MAX_CAPTURES = 12;
 
 function newId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -28,9 +28,7 @@ export default function App() {
   const [model, setModel] = useState(() => storage.getModel());
 
   const [captures, setCaptures] = useState<Capture[]>(() => storage.getCaptures());
-  const [reading, setReading] = useState<{ done: number; total: number } | null>(
-    null,
-  );
+  const [reading, setReading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [reviewRows, setReviewRows] = useState<ReviewRow[] | null>(null);
@@ -47,6 +45,11 @@ export default function App() {
   useEffect(() => {
     storage.setCaptures(captures);
   }, [captures]);
+
+  const openSearch = useCallback(() => {
+    setSearchTarget(null);
+    setSearchOpen(true);
+  }, []);
 
   const addPhotos = useCallback(async (files: File[]) => {
     setNotice(null);
@@ -70,48 +73,37 @@ export default function App() {
     }
   }, []);
 
-  /** Send every snapped label at once, then hand back one list to review. */
+  /** One Gemini call for the whole plate, then a single review list. */
   const readAll = useCallback(async () => {
     if (!captures.length) return;
     if (!apiKey) {
-      setNotice("Scanning needs a free Gemini key. Search works without one.");
+      setNotice("Reading labels needs a free Gemini key. Search works without one.");
       setSettingsOpen(true);
       return;
     }
 
     setNotice(null);
-    setReading({ done: 0, total: captures.length });
+    setReading(true);
 
     try {
-      const results = await readLabels(
+      const result = await readLabels(
         captures.map((c) => c.base64),
         apiKey,
-        {
-          model,
-          onProgress: (done, total) => setReading({ done, total }),
-        },
+        { model },
       );
 
-      const rows: ReviewRow[] = [];
-      let keyProblem = false;
+      if (!result.ok) {
+        setNotice(result.error);
+        if (result.needsKey) setSettingsOpen(true);
+        return;
+      }
 
-      results.forEach((result, i) => {
+      const rows: ReviewRow[] = [];
+
+      result.photos.forEach((names, i) => {
         const id = captures[i]?.id ?? newId();
 
-        if (!result.ok) {
-          if (result.needsKey) keyProblem = true;
-          rows.push({
-            id,
-            candidates: [],
-            selectedId: null,
-            portions: 1,
-            uncertain: false,
-            problem: result.error,
-          });
-          return;
-        }
-
-        if (!result.names.length) {
+        if (!names.length) {
           rows.push({
             id,
             candidates: [],
@@ -124,7 +116,7 @@ export default function App() {
         }
 
         // One photo can catch more than one label; each becomes its own row.
-        result.names.forEach((name, n) => {
+        names.forEach((name, n) => {
           const { candidates, confident } = matchLabelText(name, hall);
           rows.push({
             id: n === 0 ? id : `${id}-${n}`,
@@ -140,11 +132,10 @@ export default function App() {
 
       setReviewRows(rows);
       setCaptures([]);
-      if (keyProblem) setSettingsOpen(true);
     } catch {
       setNotice("Something went wrong reading those labels.");
     } finally {
-      setReading(null);
+      setReading(false);
     }
   }, [apiKey, captures, hall, model]);
 
@@ -185,7 +176,7 @@ export default function App() {
   );
 
   const empty = plate.items.length === 0;
-  const busy = reading !== null;
+  const busy = reading;
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col">
@@ -217,9 +208,17 @@ export default function App() {
         {empty ? (
           <div className="flex h-full flex-col items-center justify-center px-10 text-center">
             <p className="text-sm leading-relaxed text-neutral-500">
-              Snap a photo of each label as you go down the line. Nothing loads
-              until you sit down and tap Read labels.
+              Search for what you put on your plate — type a few letters, tap,
+              set portions. Snap labels later if you want; reading waits until
+              you sit down.
             </p>
+            <button
+              type="button"
+              onClick={openSearch}
+              className="mt-6 rounded-2xl bg-uga-red px-6 py-3.5 text-sm font-semibold text-white active:bg-uga-red-bright"
+            >
+              Search food
+            </button>
           </div>
         ) : (
           <>
@@ -273,23 +272,20 @@ export default function App() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => cameraRef.current?.click()}
-            disabled={busy}
-            className="flex flex-1 items-center justify-center gap-2.5 rounded-2xl bg-white/10 py-4 font-semibold text-white transition active:scale-[0.99] active:bg-white/20 disabled:opacity-50"
+            onClick={openSearch}
+            className="flex flex-1 items-center justify-center gap-2.5 rounded-2xl bg-uga-red py-4 font-semibold text-white transition active:scale-[0.99] active:bg-uga-red-bright"
           >
-            <CameraIcon />
-            {captures.length ? "Snap another" : "Snap label"}
+            <SearchIcon />
+            Search food
           </button>
           <button
             type="button"
-            aria-label="Search food"
-            onClick={() => {
-              setSearchTarget(null);
-              setSearchOpen(true);
-            }}
-            className="rounded-2xl border border-ink-line bg-white/5 px-5 py-4 text-neutral-300 active:bg-white/15"
+            aria-label={captures.length ? "Snap another label" : "Snap label"}
+            onClick={() => cameraRef.current?.click()}
+            disabled={busy}
+            className="rounded-2xl border border-ink-line bg-white/5 px-5 py-4 text-neutral-300 active:bg-white/15 disabled:opacity-50"
           >
-            <SearchIcon />
+            <CameraIcon />
           </button>
         </div>
 
@@ -298,11 +294,11 @@ export default function App() {
             type="button"
             onClick={readAll}
             disabled={busy}
-            className="mt-3 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-uga-red py-4 font-semibold text-white transition active:scale-[0.99] active:bg-uga-red-bright disabled:opacity-70"
+            className="mt-3 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-white/10 py-3.5 text-sm font-semibold text-white transition active:scale-[0.99] active:bg-white/20 disabled:opacity-70"
           >
             {busy && <Spinner className="h-5 w-5" />}
             {busy
-              ? `Reading ${reading.done}/${reading.total}...`
+              ? `Reading ${captures.length} label${captures.length === 1 ? "" : "s"}...`
               : `Read ${captures.length} label${captures.length === 1 ? "" : "s"}`}
           </button>
         )}
@@ -314,7 +310,7 @@ export default function App() {
             disabled={busy}
             className="mt-2 w-full py-1.5 text-xs font-medium text-neutral-600 active:text-neutral-300"
           >
-            or import photos from your camera roll
+            optional: import label photos
           </button>
         )}
       </footer>
@@ -327,7 +323,6 @@ export default function App() {
         className="hidden"
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
-          // Reset first so retaking the same shot still fires a change event.
           e.target.value = "";
           if (files.length) void addPhotos(files);
         }}
