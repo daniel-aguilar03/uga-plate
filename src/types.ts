@@ -32,7 +32,7 @@ export type Capture = {
   takenAt: number;
 };
 
-/** One food on the plate, with how many servings were taken. */
+/** One food on a plate, with how many servings were taken. */
 export type PlateItem = {
   /** Unique per row so the same dish can be added twice if you want. */
   key: string;
@@ -47,6 +47,27 @@ export type Macros = {
   fat: number;
 };
 
+/** One physical plate / trip through the line (first, seconds, thirds…). */
+export type Plate = {
+  id: string;
+  label: string;
+  items: PlateItem[];
+};
+
+/** Everything eaten in one sitting — one or more plates. */
+export type Meal = {
+  plates: Plate[];
+  activePlateId: string;
+};
+
+export type SavedMeal = {
+  id: string;
+  savedAt: string;
+  plates: { label: string; items: PlateItem[]; totals: Macros }[];
+  totals: Macros;
+};
+
+/** @deprecated Kept so older localStorage history still parses. */
 export type SavedPlate = {
   id: string;
   savedAt: string;

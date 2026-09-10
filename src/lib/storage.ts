@@ -1,9 +1,18 @@
-import type { Capture, PlateItem, SavedPlate } from "../types";
+import type {
+  Capture,
+  Meal,
+  Plate,
+  PlateItem,
+  SavedMeal,
+  SavedPlate,
+} from "../types";
 
 const KEYS = {
   apiKey: "ugaplate.apiKey",
   model: "ugaplate.model",
   hall: "ugaplate.hall",
+  meal: "ugaplate.meal",
+  /** Legacy single-plate key — migrated on read. */
   plate: "ugaplate.plate",
   captures: "ugaplate.captures",
   recents: "ugaplate.recents",
@@ -28,6 +37,48 @@ function write(key: string, value: unknown) {
   }
 }
 
+function newId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+export function plateLabel(index: number) {
+  if (index === 0) return "Plate 1";
+  if (index === 1) return "Seconds";
+  if (index === 2) return "Thirds";
+  return `Plate ${index + 1}`;
+}
+
+export function emptyPlate(index = 0): Plate {
+  return { id: newId(), label: plateLabel(index), items: [] };
+}
+
+export function emptyMeal(): Meal {
+  const plate = emptyPlate(0);
+  return { plates: [plate], activePlateId: plate.id };
+}
+
+function migrateMeal(): Meal {
+  const meal = read<Meal | null>(KEYS.meal, null);
+  if (meal?.plates?.length && meal.activePlateId) {
+    const active =
+      meal.plates.find((p) => p.id === meal.activePlateId)?.id ??
+      meal.plates[0].id;
+    return { plates: meal.plates, activePlateId: active };
+  }
+
+  // Older builds stored a flat item list.
+  const legacy = read<PlateItem[]>(KEYS.plate, []);
+  if (legacy.length) {
+    const plate = { ...emptyPlate(0), items: legacy };
+    const next = { plates: [plate], activePlateId: plate.id };
+    write(KEYS.meal, next);
+    localStorage.removeItem(KEYS.plate);
+    return next;
+  }
+
+  return emptyMeal();
+}
+
 export const storage = {
   getApiKey: () => read<string>(KEYS.apiKey, ""),
   setApiKey: (v: string) => write(KEYS.apiKey, v.trim()),
@@ -39,8 +90,8 @@ export const storage = {
   getHall: () => read<string>(KEYS.hall, ""),
   setHall: (v: string) => write(KEYS.hall, v),
 
-  getPlate: () => read<PlateItem[]>(KEYS.plate, []),
-  setPlate: (v: PlateItem[]) => write(KEYS.plate, v),
+  getMeal: () => migrateMeal(),
+  setMeal: (v: Meal) => write(KEYS.meal, v),
 
   /**
    * Label photos waiting to be read. Persisted because iOS can discard a
@@ -52,8 +103,6 @@ export const storage = {
     try {
       localStorage.setItem(KEYS.captures, JSON.stringify(v));
     } catch {
-      // Photos are big; if the quota is hit, keep only the newest few rather
-      // than leaving a stale list behind.
       try {
         localStorage.setItem(KEYS.captures, JSON.stringify(v.slice(-4)));
       } catch {
@@ -81,9 +130,22 @@ export const storage = {
     return next.includes(id);
   },
 
-  getHistory: () => read<SavedPlate[]>(KEYS.history, []),
-  pushHistory: (plate: SavedPlate) => {
-    const next = [plate, ...read<SavedPlate[]>(KEYS.history, [])];
+  getHistory: (): SavedMeal[] => {
+    const raw = read<Array<SavedMeal | SavedPlate>>(KEYS.history, []);
+    return raw.map((entry) => {
+      if ("plates" in entry && Array.isArray(entry.plates)) return entry;
+      // Legacy single-plate history row.
+      const legacy = entry as SavedPlate;
+      return {
+        id: legacy.id,
+        savedAt: legacy.savedAt,
+        plates: [{ label: "Plate 1", items: legacy.items, totals: legacy.totals }],
+        totals: legacy.totals,
+      };
+    });
+  },
+  pushHistory: (meal: SavedMeal) => {
+    const next = [meal, ...storage.getHistory()];
     write(KEYS.history, next.slice(0, 60));
   },
   clearHistory: () => write(KEYS.history, []),

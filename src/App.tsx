@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaptureTray } from "./components/CaptureTray";
 import { ConfirmSheet } from "./components/ConfirmSheet";
 import { PlateList } from "./components/PlateList";
+import { PlateTabs } from "./components/PlateTabs";
 import { PlateTotals } from "./components/PlateTotals";
 import { RecentlyScanned } from "./components/RecentlyScanned";
 import { ReviewSheet, type ReviewRow } from "./components/ReviewSheet";
@@ -13,7 +14,7 @@ import { toBase64Jpeg } from "./lib/image";
 import { hashImage, matchLabelWithCache, scanCache } from "./lib/scanCache";
 import { storage } from "./lib/storage";
 import { readLabels } from "./lib/vision";
-import { usePlate } from "./state/plate";
+import { useMeal } from "./state/plate";
 import type { Capture, Food } from "./types";
 
 const MAX_CAPTURES = 12;
@@ -57,7 +58,7 @@ function rowsFromNames(
 }
 
 export default function App() {
-  const plate = usePlate();
+  const meal = useMeal();
 
   const [apiKey, setApiKey] = useState(() => storage.getApiKey());
   const [hall, setHall] = useState(() => storage.getHall());
@@ -87,7 +88,7 @@ export default function App() {
     () => scanCache.recentlyScannedFoods(),
     // Refresh when the user confirms new label dishes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scannedTick, plate.items],
+    [scannedTick, meal.items],
   );
 
   const openSearch = useCallback(() => {
@@ -208,13 +209,13 @@ export default function App() {
   const rememberAndAdd = useCallback(
     (items: { food: Food; portions: number; readAs?: string }[]) => {
       for (const { food, portions, readAs } of items) {
-        plate.addFood(food, portions);
+        meal.addFood(food, portions);
         scanCache.pushScanned(food.id);
         if (readAs) scanCache.rememberName(readAs, food.id);
       }
       setScannedTick((n) => n + 1);
     },
-    [plate],
+    [meal],
   );
 
   const addAll = useCallback(
@@ -260,7 +261,8 @@ export default function App() {
     [searchTarget],
   );
 
-  const empty = plate.items.length === 0;
+  const mealItemCount = meal.plates.reduce((n, p) => n + p.items.length, 0);
+  const activeEmpty = meal.items.length === 0;
   const busy = reading;
 
   return (
@@ -287,15 +289,45 @@ export default function App() {
         </div>
       </header>
 
-      <PlateTotals totals={plate.totals} count={plate.items.length} />
+      <PlateTotals
+        mealTotals={meal.totals}
+        mealItemCount={mealItemCount}
+        plateTotals={meal.plateTotals}
+        plateLabel={meal.activePlate?.label ?? "Plate 1"}
+        plateCount={meal.plates.length}
+        summaries={meal.plateSummaries}
+        activePlateId={meal.activePlate?.id ?? ""}
+        onSelectPlate={meal.setActivePlate}
+      />
+
+      <PlateTabs
+        plates={meal.plates.map((p) => ({
+          id: p.id,
+          label: p.label,
+          itemCount: p.items.length,
+        }))}
+        activePlateId={meal.activePlate?.id ?? ""}
+        onSelect={meal.setActivePlate}
+        onAdd={() => {
+          const nextIndex = meal.plates.length;
+          meal.addPlate();
+          setNotice(
+            nextIndex === 1
+              ? "Seconds started — add what you grabbed this trip."
+              : nextIndex === 2
+                ? "Thirds started."
+                : `Plate ${nextIndex + 1} started.`,
+          );
+        }}
+      />
 
       <main className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {empty ? (
+        {activeEmpty ? (
           <div className="flex h-full flex-col items-center justify-center px-10 text-center">
             <p className="text-sm leading-relaxed text-neutral-500">
-              Search for what you put on your plate — type a few letters, tap,
-              set portions. Snap labels later if you want; reading waits until
-              you sit down.
+              {meal.plates.length > 1
+                ? `Building ${meal.activePlate?.label ?? "this plate"}. Search or snap labels — the meal total up top keeps everything.`
+                : "Search for what you put on your plate — type a few letters, tap, set portions. Going back for seconds? Tap + Seconds when you're ready."}
             </p>
             <button
               type="button"
@@ -308,25 +340,34 @@ export default function App() {
         ) : (
           <>
             <PlateList
-              items={plate.items}
-              onSetPortions={plate.setPortions}
-              onRemove={plate.removeItem}
+              items={meal.items}
+              onSetPortions={meal.setPortions}
+              onRemove={meal.removeItem}
             />
-            <div className="mt-4 flex justify-center gap-6 text-xs">
+            <div className="mt-4 flex flex-wrap justify-center gap-4 text-xs">
               <button
                 type="button"
-                onClick={plate.finish}
+                onClick={meal.finishMeal}
                 className="rounded-lg px-3 py-2 font-medium text-neutral-400 active:bg-white/10"
               >
-                Finish plate
+                Finish meal
               </button>
               <button
                 type="button"
-                onClick={plate.clear}
+                onClick={meal.clearActivePlate}
                 className="rounded-lg px-3 py-2 font-medium text-neutral-600 active:bg-white/10"
               >
-                Clear
+                Clear {meal.activePlate?.label ?? "plate"}
               </button>
+              {meal.plates.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => meal.removePlate(meal.activePlate!.id)}
+                  className="rounded-lg px-3 py-2 font-medium text-neutral-600 active:bg-white/10"
+                >
+                  Remove {meal.activePlate?.label ?? "plate"}
+                </button>
+              )}
             </div>
           </>
         )}
@@ -348,10 +389,10 @@ export default function App() {
       <RecentlyScanned
         foods={recentlyScanned}
         onAdd={(food) => {
-          plate.addFood(food, 1);
+          meal.addFood(food, 1);
           scanCache.pushScanned(food.id);
           setScannedTick((n) => n + 1);
-          setNotice(`Added another ${food.name}.`);
+          setNotice(`Added to ${meal.activePlate?.label ?? "plate"}: ${food.name}.`);
         }}
       />
 
