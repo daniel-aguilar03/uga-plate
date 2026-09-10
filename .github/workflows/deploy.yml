@@ -26,6 +26,13 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      - name: Build barcode probe
+        working-directory: barcode-probe
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../dist/barcode-probe
+          cp -R dist/. ../dist/barcode-probe/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
