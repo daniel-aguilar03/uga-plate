@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaptureTray } from "./components/CaptureTray";
 import { ConfirmSheet } from "./components/ConfirmSheet";
 import { PlateList } from "./components/PlateList";
 import { PlateTotals } from "./components/PlateTotals";
+import { RecentlyScanned } from "./components/RecentlyScanned";
 import { ReviewSheet, type ReviewRow } from "./components/ReviewSheet";
 import { SearchSheet } from "./components/SearchSheet";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { CameraIcon, GearIcon, SearchIcon, Spinner } from "./components/icons";
-import { matchLabelText, type Ranked } from "./lib/catalog";
+import { type Ranked } from "./lib/catalog";
 import { toBase64Jpeg } from "./lib/image";
+import { hashImage, matchLabelWithCache, scanCache } from "./lib/scanCache";
 import { storage } from "./lib/storage";
 import { readLabels } from "./lib/vision";
 import { usePlate } from "./state/plate";
@@ -18,6 +20,40 @@ const MAX_CAPTURES = 12;
 
 function newId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function rowsFromNames(
+  names: string[],
+  id: string,
+  hall: string,
+  fromCache: boolean,
+): ReviewRow[] {
+  if (!names.length) {
+    return [
+      {
+        id,
+        candidates: [],
+        selectedId: null,
+        portions: 1,
+        uncertain: false,
+        problem: "no dish name found",
+      },
+    ];
+  }
+
+  return names.map((name, n) => {
+    const { candidates, confident } = matchLabelWithCache(name, hall);
+    return {
+      id: n === 0 ? id : `${id}-${n}`,
+      candidates,
+      selectedId: candidates[0]?.food.id ?? null,
+      portions: 1,
+      // Cached confirmations are treated as known; still flag fuzzy OCR hits.
+      uncertain: candidates.length > 0 && !confident && !fromCache,
+      readAs: name,
+      problem: candidates.length ? undefined : "no UGA dish matched",
+    };
+  });
 }
 
 export default function App() {
@@ -30,6 +66,7 @@ export default function App() {
   const [captures, setCaptures] = useState<Capture[]>(() => storage.getCaptures());
   const [reading, setReading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [scannedTick, setScannedTick] = useState(0);
 
   const [reviewRows, setReviewRows] = useState<ReviewRow[] | null>(null);
   /** When set, a search result replaces this review row instead of adding directly. */
@@ -45,6 +82,13 @@ export default function App() {
   useEffect(() => {
     storage.setCaptures(captures);
   }, [captures]);
+
+  const recentlyScanned = useMemo(
+    () => scanCache.recentlyScannedFoods(),
+    // Refresh when the user confirms new label dishes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scannedTick, plate.items],
+  );
 
   const openSearch = useCallback(() => {
     setSearchTarget(null);
@@ -73,65 +117,87 @@ export default function App() {
     }
   }, []);
 
-  /** One Gemini call for the whole plate, then a single review list. */
+  /**
+   * Read the plate: reuse Gemini results for photos we've seen before, and only
+   * call the model for the rest — so seconds of the same label are instant.
+   */
   const readAll = useCallback(async () => {
     if (!captures.length) return;
-    if (!apiKey) {
-      setNotice("Reading labels needs a free Gemini key. Search works without one.");
-      setSettingsOpen(true);
-      return;
-    }
 
     setNotice(null);
     setReading(true);
 
     try {
-      const result = await readLabels(
-        captures.map((c) => c.base64),
-        apiKey,
-        { model },
+      const hashes = await Promise.all(captures.map((c) => hashImage(c.base64)));
+      const photoNames: (string[] | null)[] = hashes.map((h) =>
+        scanCache.getImageNames(h),
       );
 
-      if (!result.ok) {
-        setNotice(result.error);
-        if (result.needsKey) setSettingsOpen(true);
-        return;
+      const missIndexes: number[] = [];
+      photoNames.forEach((names, i) => {
+        if (!names) missIndexes.push(i);
+      });
+
+      if (missIndexes.length) {
+        if (!apiKey) {
+          setNotice(
+            "Reading new labels needs a free Gemini key. Search and cached labels still work.",
+          );
+          setSettingsOpen(true);
+          if (missIndexes.length === captures.length) return;
+        } else {
+          const result = await readLabels(
+            missIndexes.map((i) => captures[i].base64),
+            apiKey,
+            { model },
+          );
+
+          if (!result.ok) {
+            setNotice(result.error);
+            if (result.needsKey) setSettingsOpen(true);
+            if (missIndexes.length === captures.length) return;
+          } else {
+            result.photos.forEach((names, j) => {
+              const index = missIndexes[j];
+              photoNames[index] = names;
+              if (names.length) scanCache.setImageNames(hashes[index], names);
+            });
+          }
+        }
       }
 
       const rows: ReviewRow[] = [];
+      let cachedCount = 0;
 
-      result.photos.forEach((names, i) => {
+      photoNames.forEach((names, i) => {
         const id = captures[i]?.id ?? newId();
-
-        if (!names.length) {
+        if (names == null) {
           rows.push({
             id,
             candidates: [],
             selectedId: null,
             portions: 1,
             uncertain: false,
-            problem: "no dish name found",
+            problem: "could not be read",
           });
           return;
         }
-
-        // One photo can catch more than one label; each becomes its own row.
-        names.forEach((name, n) => {
-          const { candidates, confident } = matchLabelText(name, hall);
-          rows.push({
-            id: n === 0 ? id : `${id}-${n}`,
-            candidates,
-            selectedId: candidates[0]?.food.id ?? null,
-            portions: 1,
-            uncertain: candidates.length > 0 && !confident,
-            readAs: name,
-            problem: candidates.length ? undefined : "no UGA dish matched",
-          });
-        });
+        const fromCache = !missIndexes.includes(i);
+        if (fromCache) cachedCount++;
+        rows.push(...rowsFromNames(names, id, hall, fromCache));
       });
 
       setReviewRows(rows);
       setCaptures([]);
+      if (cachedCount && cachedCount === captures.length) {
+        setNotice(
+          cachedCount === 1
+            ? "Loaded from cache — no wait."
+            : `All ${cachedCount} labels loaded from cache — no wait.`,
+        );
+      } else if (cachedCount) {
+        setNotice(`${cachedCount} of ${captures.length} labels came from cache.`);
+      }
     } catch {
       setNotice("Something went wrong reading those labels.");
     } finally {
@@ -139,19 +205,38 @@ export default function App() {
     }
   }, [apiKey, captures, hall, model]);
 
-  const addAll = useCallback(
-    (items: { food: Food; portions: number }[]) => {
-      for (const { food, portions } of items) plate.addFood(food, portions);
-      setReviewRows(null);
+  const rememberAndAdd = useCallback(
+    (items: { food: Food; portions: number; readAs?: string }[]) => {
+      for (const { food, portions, readAs } of items) {
+        plate.addFood(food, portions);
+        scanCache.pushScanned(food.id);
+        if (readAs) scanCache.rememberName(readAs, food.id);
+      }
+      setScannedTick((n) => n + 1);
     },
     [plate],
+  );
+
+  const addAll = useCallback(
+    (items: { food: Food; portions: number }[]) => {
+      const withNames = items.map((item) => {
+        const row = (reviewRows ?? []).find(
+          (r) =>
+            r.selectedId === item.food.id ||
+            r.candidates[0]?.food.id === item.food.id,
+        );
+        return { ...item, readAs: row?.readAs };
+      });
+      rememberAndAdd(withNames);
+      setReviewRows(null);
+    },
+    [rememberAndAdd, reviewRows],
   );
 
   const pickFromSearch = useCallback(
     (food: Food) => {
       setSearchOpen(false);
 
-      // Searching from a review row swaps that row's dish rather than adding.
       if (searchTarget) {
         setReviewRows((rows) =>
           (rows ?? []).map((r) =>
@@ -260,6 +345,16 @@ export default function App() {
         </div>
       )}
 
+      <RecentlyScanned
+        foods={recentlyScanned}
+        onAdd={(food) => {
+          plate.addFood(food, 1);
+          scanCache.pushScanned(food.id);
+          setScannedTick((n) => n + 1);
+          setNotice(`Added another ${food.name}.`);
+        }}
+      />
+
       <CaptureTray
         captures={captures}
         onRemove={(id) => setCaptures((prev) => prev.filter((c) => c.id !== id))}
@@ -298,7 +393,7 @@ export default function App() {
           >
             {busy && <Spinner className="h-5 w-5" />}
             {busy
-              ? `Reading ${captures.length} label${captures.length === 1 ? "" : "s"}...`
+              ? "Reading labels..."
               : `Read ${captures.length} label${captures.length === 1 ? "" : "s"}`}
           </button>
         )}
@@ -356,7 +451,7 @@ export default function App() {
         open={confirmFood !== null}
         candidates={confirmFood ?? []}
         onAdd={(food, portions) => {
-          plate.addFood(food, portions);
+          rememberAndAdd([{ food, portions }]);
           setConfirmFood(null);
         }}
         onClose={() => setConfirmFood(null)}
